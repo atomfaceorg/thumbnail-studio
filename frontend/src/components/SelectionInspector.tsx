@@ -6,11 +6,12 @@ interface Props {
 }
 
 export default function SelectionInspector({ editor }: Props) {
-  if (!editor.textProps && !editor.strokeProps) return null;
+  if (!editor.textProps && !editor.shapeProps && !editor.strokeProps) return null;
 
   return (
     <div className="text-inspector">
       {editor.textProps && <TextFields editor={editor} />}
+      {editor.shapeProps && <ShapeFields editor={editor} />}
       {editor.strokeProps && <StrokeFields editor={editor} />}
     </div>
   );
@@ -52,6 +53,34 @@ function TextFields({ editor }: Props) {
             if (Number.isFinite(n) && n > 0) editor.setTextFontSize(n);
           }}
         />
+      </label>
+    </>
+  );
+}
+
+function ShapeFields({ editor }: Props) {
+  const { fill, opacity } = editor.shapeProps!;
+  return (
+    <>
+      <label className="text-inspector-field">
+        <span>Fill</span>
+        <input
+          type="color"
+          value={fill.startsWith("#") ? fill : "#111111"}
+          onChange={(e) => editor.setShapeFill(e.target.value)}
+        />
+      </label>
+
+      <label className="text-inspector-field">
+        <span>Opacity</span>
+        <input
+          type="range"
+          min={0}
+          max={100}
+          value={Math.round(opacity * 100)}
+          onChange={(e) => editor.setShapeOpacity(Number(e.target.value) / 100)}
+        />
+        <span className="text-inspector-value">{Math.round(opacity * 100)}%</span>
       </label>
     </>
   );

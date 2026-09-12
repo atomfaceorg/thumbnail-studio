@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ActiveSelection, Canvas, FabricImage, IText, Shadow, type FabricObject } from "fabric";
-import { CANVAS_WIDTH, CANVAS_HEIGHT, HISTORY_LIMIT, STORAGE_KEY, TEXT_FONT_OPTIONS } from "./constants";
-import type { LayerInfo, StrokeProps, TextPreset, TextProps } from "./types";
+import { ActiveSelection, Canvas, FabricImage, IText, Rect, Shadow, type FabricObject } from "fabric";
+import {
+  CANVAS_WIDTH,
+  CANVAS_HEIGHT,
+  DEFAULT_RECT_FILL,
+  HISTORY_LIMIT,
+  STORAGE_KEY,
+  TEXT_FONT_OPTIONS,
+} from "./constants";
+import type { LayerInfo, ShapeProps, StrokeProps, TextPreset, TextProps } from "./types";
 import { removeBackground, urlToBlob } from "./backgroundRemoval";
 
 // Fabric objects don't carry id/name by default; we stamp both on every
@@ -124,6 +131,7 @@ export function useEditor(
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [textProps, setTextProps] = useState<TextProps | null>(null);
   const [strokeProps, setStrokeProps] = useState<StrokeProps | null>(null);
+  const [shapeProps, setShapeProps] = useState<ShapeProps | null>(null);
   const [displayScale, setDisplayScale] = useState(1);
   const [busy, setBusy] = useState(false);
   const [canUndo, setCanUndo] = useState(false);
@@ -185,6 +193,16 @@ export function useEditor(
       }
     } else {
       setStrokeProps(null);
+    }
+
+    if (activeObjects.length > 0 && activeObjects[0].type === "rect") {
+      const first = activeObjects[0];
+      setShapeProps({
+        fill: typeof first.fill === "string" ? first.fill : DEFAULT_RECT_FILL,
+        opacity: first.opacity ?? 1,
+      });
+    } else {
+      setShapeProps(null);
     }
   }, []);
 
@@ -374,6 +392,27 @@ export function useEditor(
     canvas.requestRenderAll();
   }, []);
 
+  // defaults to a full-canvas rect sent to the back, so "add rectangle" is
+  // a one-click color background — resize/move/restyle it like any layer.
+  const addRectangle = useCallback(() => {
+    const canvas = fabricRef.current;
+    if (!canvas) return;
+    const rect = new Rect({
+      left: 0,
+      top: 0,
+      width: CANVAS_WIDTH,
+      height: CANVAS_HEIGHT,
+      fill: DEFAULT_RECT_FILL,
+    });
+    const eo = asEditable(rect);
+    eo.id = makeId();
+    eo.name = "Rectangle";
+    canvas.add(rect);
+    canvas.sendObjectToBack(rect);
+    canvas.setActiveObject(rect);
+    canvas.requestRenderAll();
+  }, []);
+
   const addImageFile = useCallback(async (file: File) => {
     const canvas = fabricRef.current;
     if (!canvas) return;
@@ -541,6 +580,25 @@ export function useEditor(
     [applyToSelectedText]
   );
 
+  const applyToSelectedShapes = useCallback(
+    (patch: Partial<ShapeProps>) => {
+      const canvas = fabricRef.current;
+      if (!canvas) return;
+      const targets = canvas.getActiveObjects().filter((o) => o.type === "rect");
+      if (targets.length === 0) return;
+      for (const t of targets) t.set(patch);
+      canvas.requestRenderAll();
+      notifyChange();
+    },
+    [notifyChange]
+  );
+
+  const setShapeFill = useCallback((fill: string) => applyToSelectedShapes({ fill }), [applyToSelectedShapes]);
+  const setShapeOpacity = useCallback(
+    (opacity: number) => applyToSelectedShapes({ opacity }),
+    [applyToSelectedShapes]
+  );
+
   const reselectByIds = useCallback(
     (ids: string[]) => {
       const canvas = fabricRef.current;
@@ -706,11 +764,13 @@ export function useEditor(
     selectedId: selectedIds[0] ?? null,
     textProps,
     strokeProps,
+    shapeProps,
     displayScale,
     busy,
     canUndo,
     canRedo,
     addText,
+    addRectangle,
     addImageFile,
     removeBackgroundForSelected,
     selectLayer,
@@ -725,6 +785,8 @@ export function useEditor(
     setTextFontSize,
     setStrokeColor,
     setStrokeWidth,
+    setShapeFill,
+    setShapeOpacity,
     undo,
     redo,
     exportPNG,

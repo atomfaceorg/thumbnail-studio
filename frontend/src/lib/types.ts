@@ -20,3 +20,8 @@ export interface StrokeProps {
   color: string;
   width: number;
 }
+
+export interface ShapeProps {
+  fill: string;
+  opacity: number;
+}

@@ -192,6 +192,17 @@ button.primary:hover {
   background: var(--border);
 }
 
+.text-inspector-field input[type="range"] {
+  width: 100px;
+  accent-color: var(--accent);
+}
+
+.text-inspector-value {
+  font-size: 12px;
+  color: var(--text-dim);
+  min-width: 32px;
+}
+
 .workspace {
   flex: 1;
   display: flex;

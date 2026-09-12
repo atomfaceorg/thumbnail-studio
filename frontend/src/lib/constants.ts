@@ -23,3 +23,5 @@ export const TEXT_FONT_OPTIONS = [
 ] as const;
 
 export const HISTORY_LIMIT = 100;
+
+export const DEFAULT_RECT_FILL = "#111111";

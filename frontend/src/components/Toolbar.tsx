@@ -34,6 +34,7 @@ export default function Toolbar({ editor }: Props) {
           onChange={handleFilePicked}
         />
         <TextPresetButtons onPick={editor.addText} />
+        <button onClick={editor.addRectangle}>Rectangle</button>
       </div>
 
       <div className="toolbar-group">
