@@ -5,12 +5,21 @@ interface Props {
   editor: Editor;
 }
 
-export default function TextInspector({ editor }: Props) {
-  if (!editor.textProps) return null;
-  const { fill, fontFamily, fontSize } = editor.textProps;
+export default function SelectionInspector({ editor }: Props) {
+  if (!editor.textProps && !editor.strokeProps) return null;
 
   return (
     <div className="text-inspector">
+      {editor.textProps && <TextFields editor={editor} />}
+      {editor.strokeProps && <StrokeFields editor={editor} />}
+    </div>
+  );
+}
+
+function TextFields({ editor }: Props) {
+  const { fill, fontFamily, fontSize } = editor.textProps!;
+  return (
+    <>
       <label className="text-inspector-field">
         <span>Color</span>
         <input
@@ -44,6 +53,34 @@ export default function TextInspector({ editor }: Props) {
           }}
         />
       </label>
-    </div>
+    </>
+  );
+}
+
+function StrokeFields({ editor }: Props) {
+  const { color, width } = editor.strokeProps!;
+  return (
+    <>
+      <span className="text-inspector-divider" />
+
+      <label className="text-inspector-field">
+        <span>Stroke</span>
+        <input type="color" value={color} onChange={(e) => editor.setStrokeColor(e.target.value)} />
+      </label>
+
+      <label className="text-inspector-field">
+        <span>Width</span>
+        <input
+          type="number"
+          min={0}
+          max={60}
+          value={Math.round(width)}
+          onChange={(e) => {
+            const n = Number(e.target.value);
+            if (Number.isFinite(n) && n >= 0) editor.setStrokeWidth(n);
+          }}
+        />
+      </label>
+    </>
   );
 }

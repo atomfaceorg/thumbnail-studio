@@ -186,6 +186,12 @@ button.primary:hover {
   width: 64px;
 }
 
+.text-inspector-divider {
+  width: 1px;
+  align-self: stretch;
+  background: var(--border);
+}
+
 .workspace {
   flex: 1;
   display: flex;

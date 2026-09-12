@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ActiveSelection, Canvas, FabricImage, IText, Shadow, type FabricObject } from "fabric";
 import { CANVAS_WIDTH, CANVAS_HEIGHT, HISTORY_LIMIT, STORAGE_KEY, TEXT_FONT_OPTIONS } from "./constants";
-import type { LayerInfo, TextPreset, TextProps } from "./types";
+import type { LayerInfo, StrokeProps, TextPreset, TextProps } from "./types";
 import { removeBackground, urlToBlob } from "./backgroundRemoval";
 
 // Fabric objects don't carry id/name by default; we stamp both on every
@@ -59,6 +59,7 @@ export function useEditor(
   const [layers, setLayers] = useState<LayerInfo[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [textProps, setTextProps] = useState<TextProps | null>(null);
+  const [strokeProps, setStrokeProps] = useState<StrokeProps | null>(null);
   const [displayScale, setDisplayScale] = useState(1);
   const [busy, setBusy] = useState(false);
   const [canUndo, setCanUndo] = useState(false);
@@ -100,6 +101,17 @@ export function useEditor(
       });
     } else {
       setTextProps(null);
+    }
+
+    if (activeObjects.length > 0) {
+      const first = activeObjects[0];
+      const hasStroke = typeof first.stroke === "string" && first.stroke.length > 0;
+      setStrokeProps({
+        color: hasStroke ? (first.stroke as string) : "#000000",
+        width: hasStroke ? first.strokeWidth ?? 1 : 0,
+      });
+    } else {
+      setStrokeProps(null);
     }
   }, []);
 
@@ -452,6 +464,39 @@ export function useEditor(
     [applyToSelectedText]
   );
 
+  // stroke applies to any selected layer (text or image), not just text
+  const setStrokeColor = useCallback(
+    (color: string) => {
+      const canvas = fabricRef.current;
+      if (!canvas) return;
+      const targets = canvas.getActiveObjects();
+      if (targets.length === 0) return;
+      for (const t of targets) {
+        t.set({ stroke: color });
+        if (!t.strokeWidth) t.set({ strokeWidth: 4 }); // make the color change visible immediately
+      }
+      canvas.requestRenderAll();
+      notifyChange();
+    },
+    [notifyChange]
+  );
+
+  const setStrokeWidth = useCallback(
+    (width: number) => {
+      const canvas = fabricRef.current;
+      if (!canvas) return;
+      const targets = canvas.getActiveObjects();
+      if (targets.length === 0) return;
+      for (const t of targets) {
+        t.set({ strokeWidth: width });
+        if (width > 0 && !t.stroke) t.set({ stroke: "#000000" }); // default a color in so width alone is visible
+      }
+      canvas.requestRenderAll();
+      notifyChange();
+    },
+    [notifyChange]
+  );
+
   const restoreSnapshot = useCallback(
     (snapshot: string) => {
       const canvas = fabricRef.current;
@@ -528,6 +573,7 @@ export function useEditor(
     selectedIds,
     selectedId: selectedIds[0] ?? null,
     textProps,
+    strokeProps,
     displayScale,
     busy,
     canUndo,
@@ -545,6 +591,8 @@ export function useEditor(
     setTextFill,
     setTextFontFamily,
     setTextFontSize,
+    setStrokeColor,
+    setStrokeWidth,
     undo,
     redo,
     exportPNG,

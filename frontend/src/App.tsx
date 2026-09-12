@@ -2,7 +2,7 @@ import { useRef } from "react";
 import Toolbar from "./components/Toolbar";
 import LayersPanel from "./components/LayersPanel";
 import CanvasStage from "./components/CanvasStage";
-import TextInspector from "./components/TextInspector";
+import SelectionInspector from "./components/SelectionInspector";
 import { useEditor } from "./lib/useEditor";
 
 export default function App() {
@@ -13,7 +13,7 @@ export default function App() {
   return (
     <div className="app">
       <Toolbar editor={editor} />
-      <TextInspector editor={editor} />
+      <SelectionInspector editor={editor} />
       <div className="workspace">
         <CanvasStage containerRef={containerRef} canvasElRef={canvasElRef} />
         <LayersPanel editor={editor} />

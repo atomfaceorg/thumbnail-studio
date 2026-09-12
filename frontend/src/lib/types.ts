@@ -15,3 +15,8 @@ export interface TextProps {
   fontFamily: string;
   fontSize: number;
 }
+
+export interface StrokeProps {
+  color: string;
+  width: number;
+}
