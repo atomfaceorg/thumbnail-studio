@@ -8,7 +8,19 @@ import { removeBackground, urlToBlob } from "./backgroundRemoval";
 // object we create and ask fabric to serialize them via toJSON/toObject's
 // propertiesToInclude list so they survive save/load.
 type EditableObject = FabricObject & { id: string; name: string };
-const PERSISTED_EXTRA_PROPS = ["id", "name"];
+
+// Image "stroke" isn't fabric's built-in stroke (that just outlines the
+// bounding box) — it's a composited silhouette outline. baseSrc is the
+// clean, un-outlined source (updated to the cutout after background
+// removal) that every outline regeneration starts from, so adjusting width
+// repeatedly never compounds.
+type EditableImage = EditableObject & {
+  baseSrc?: string;
+  outlineColor?: string;
+  outlineWidth?: number;
+};
+
+const PERSISTED_EXTRA_PROPS = ["id", "name", "baseSrc", "outlineColor", "outlineWidth"];
 
 function makeId() {
   return crypto.randomUUID();
@@ -49,6 +61,58 @@ function ensureIdsAndNames(canvas: Canvas) {
     if (!eo.id) eo.id = makeId();
     if (!eo.name) eo.name = eo.type === "i-text" ? "Text" : "Layer";
   }
+}
+
+function loadHTMLImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error(`Failed to load image: ${src}`));
+    img.src = src;
+  });
+}
+
+// Builds a bitmap where the image's alpha silhouette (i.e. whatever survived
+// background removal, or the full rect if it hasn't been cut out) is
+// recolored and stamped around a ring to dilate it into a solid outline,
+// then the original image is drawn on top — a classic "sticker" edge that
+// hugs the actual subject instead of the rectangular photo bounds.
+async function generateOutlinedImageBlob(
+  baseSrc: string,
+  color: string,
+  radius: number
+): Promise<Blob> {
+  const img = await loadHTMLImage(baseSrc);
+  const r = Math.max(1, Math.round(radius));
+  const w = img.naturalWidth + r * 2;
+  const h = img.naturalHeight + r * 2;
+
+  const silhouette = document.createElement("canvas");
+  silhouette.width = w;
+  silhouette.height = h;
+  const sctx = silhouette.getContext("2d")!;
+  sctx.drawImage(img, r, r);
+  // source-in keeps the destination's alpha (the image's shape/soft edges)
+  // and replaces its color, producing a solid-color cutout of the subject.
+  sctx.globalCompositeOperation = "source-in";
+  sctx.fillStyle = color;
+  sctx.fillRect(0, 0, w, h);
+
+  const out = document.createElement("canvas");
+  out.width = w;
+  out.height = h;
+  const octx = out.getContext("2d")!;
+  const steps = 36;
+  for (let i = 0; i < steps; i++) {
+    const angle = (i / steps) * Math.PI * 2;
+    octx.drawImage(silhouette, Math.round(Math.cos(angle) * r), Math.round(Math.sin(angle) * r));
+  }
+  octx.drawImage(img, r, r);
+
+  return new Promise((resolve, reject) => {
+    out.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("toBlob failed"))), "image/png");
+  });
 }
 
 export function useEditor(
@@ -105,11 +169,20 @@ export function useEditor(
 
     if (activeObjects.length > 0) {
       const first = activeObjects[0];
-      const hasStroke = typeof first.stroke === "string" && first.stroke.length > 0;
-      setStrokeProps({
-        color: hasStroke ? (first.stroke as string) : "#000000",
-        width: hasStroke ? first.strokeWidth ?? 1 : 0,
-      });
+      if (first.type === "image") {
+        const fi = first as unknown as EditableImage;
+        const hasOutline = !!fi.outlineColor && (fi.outlineWidth ?? 0) > 0;
+        setStrokeProps({
+          color: hasOutline ? fi.outlineColor! : "#000000",
+          width: hasOutline ? fi.outlineWidth! : 0,
+        });
+      } else {
+        const hasStroke = typeof first.stroke === "string" && first.stroke.length > 0;
+        setStrokeProps({
+          color: hasStroke ? (first.stroke as string) : "#000000",
+          width: hasStroke ? first.strokeWidth ?? 1 : 0,
+        });
+      }
     } else {
       setStrokeProps(null);
     }
@@ -319,9 +392,10 @@ export function useEditor(
       scaleX: scale,
       scaleY: scale,
     });
-    const eo = asEditable(img);
+    const eo = asEditable(img) as EditableImage;
     eo.id = makeId();
     eo.name = file.name.replace(/\.[^/.]+$/, "") || "Image";
+    eo.baseSrc = url;
     canvas.add(img);
     canvas.setActiveObject(img);
     canvas.requestRenderAll();
@@ -352,9 +426,12 @@ export function useEditor(
         scaleY: imageObj.scaleY,
         angle: imageObj.angle,
       });
-      const replacementEo = asEditable(replacement);
+      const replacementEo = asEditable(replacement) as EditableImage;
       replacementEo.id = eo.id;
       replacementEo.name = eo.name;
+      // the cutout becomes the new clean base — any outline drawn from here
+      // on traces the subject, not the original rectangular photo.
+      replacementEo.baseSrc = resultUrl;
 
       const index = canvas.getObjects().indexOf(imageObj);
       canvas.remove(imageObj);
@@ -464,38 +541,93 @@ export function useEditor(
     [applyToSelectedText]
   );
 
-  // stroke applies to any selected layer (text or image), not just text
-  const setStrokeColor = useCallback(
-    (color: string) => {
+  const reselectByIds = useCallback(
+    (ids: string[]) => {
       const canvas = fabricRef.current;
       if (!canvas) return;
-      const targets = canvas.getActiveObjects();
-      if (targets.length === 0) return;
-      for (const t of targets) {
-        t.set({ stroke: color });
-        if (!t.strokeWidth) t.set({ strokeWidth: 4 }); // make the color change visible immediately
-      }
+      const objs = ids.map((id) => findById(id)).filter((o): o is EditableObject => !!o);
+      canvas.discardActiveObject();
+      if (objs.length === 1) canvas.setActiveObject(objs[0]);
+      else if (objs.length > 1) canvas.setActiveObject(new ActiveSelection(objs, { canvas }));
       canvas.requestRenderAll();
-      notifyChange();
+      refreshLayers();
     },
-    [notifyChange]
+    [findById, refreshLayers]
   );
 
-  const setStrokeWidth = useCallback(
-    (width: number) => {
+  // Image "stroke" is a composited silhouette outline (see
+  // generateOutlinedImageBlob), not fabric's built-in bounding-box stroke —
+  // so applying it means regenerating and swapping in a new bitmap, always
+  // starting from the object's baseSrc so repeated width/color tweaks never
+  // compound on top of a previous outline.
+  const applyImageOutline = useCallback(async (imageObj: FabricImage, color: string, width: number) => {
+    const canvas = fabricRef.current;
+    if (!canvas) return;
+    const eo = asEditable(imageObj) as EditableImage;
+    const baseSrc = eo.baseSrc ?? imageObj.getSrc();
+    const newUrl = width > 0 ? URL.createObjectURL(await generateOutlinedImageBlob(baseSrc, color, width / (imageObj.scaleX || 1))) : baseSrc;
+
+    const replacement = await FabricImage.fromURL(newUrl, { crossOrigin: "anonymous" });
+    replacement.set({
+      left: imageObj.left,
+      top: imageObj.top,
+      originX: imageObj.originX,
+      originY: imageObj.originY,
+      scaleX: imageObj.scaleX,
+      scaleY: imageObj.scaleY,
+      angle: imageObj.angle,
+    });
+    const reo = asEditable(replacement) as EditableImage;
+    reo.id = eo.id;
+    reo.name = eo.name;
+    reo.baseSrc = baseSrc;
+    reo.outlineColor = width > 0 ? color : undefined;
+    reo.outlineWidth = width > 0 ? width : 0;
+
+    const index = canvas.getObjects().indexOf(imageObj);
+    canvas.remove(imageObj);
+    canvas.insertAt(index, replacement);
+    canvas.requestRenderAll();
+  }, []);
+
+  // stroke applies to any selected layer: native fabric stroke for text
+  // (per-glyph outline), a composited silhouette outline for images.
+  const applyStroke = useCallback(
+    async (patch: { color?: string; width?: number }) => {
       const canvas = fabricRef.current;
       if (!canvas) return;
       const targets = canvas.getActiveObjects();
       if (targets.length === 0) return;
+      const selectionSnapshot = targets.map((t) => asEditable(t).id);
+
+      const imagePromises: Promise<void>[] = [];
       for (const t of targets) {
-        t.set({ strokeWidth: width });
-        if (width > 0 && !t.stroke) t.set({ stroke: "#000000" }); // default a color in so width alone is visible
+        if (t.type === "image") {
+          const eo = asEditable(t) as EditableImage;
+          const color = patch.color ?? eo.outlineColor ?? "#000000";
+          let width = patch.width ?? eo.outlineWidth ?? 0;
+          if (patch.color !== undefined && width <= 0) width = 4; // picking a color alone should be visible
+          imagePromises.push(applyImageOutline(t as FabricImage, color, width));
+        } else {
+          if (patch.color !== undefined) t.set({ stroke: patch.color });
+          if (patch.width !== undefined) t.set({ strokeWidth: patch.width });
+          if (patch.color !== undefined && !t.strokeWidth) t.set({ strokeWidth: 4 });
+          if (patch.width !== undefined && patch.width > 0 && !t.stroke) t.set({ stroke: "#000000" });
+        }
       }
       canvas.requestRenderAll();
       notifyChange();
+
+      if (imagePromises.length > 0) {
+        await Promise.all(imagePromises);
+        reselectByIds(selectionSnapshot);
+      }
     },
-    [notifyChange]
+    [applyImageOutline, notifyChange, reselectByIds]
   );
+
+  const setStrokeColor = useCallback((color: string) => applyStroke({ color }), [applyStroke]);
+  const setStrokeWidth = useCallback((width: number) => applyStroke({ width }), [applyStroke]);
 
   const restoreSnapshot = useCallback(
     (snapshot: string) => {
