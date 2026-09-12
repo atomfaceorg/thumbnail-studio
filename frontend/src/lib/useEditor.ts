@@ -178,17 +178,18 @@ export function useEditor(
     if (activeObjects.length > 0) {
       const first = activeObjects[0];
       if (first.type === "image") {
+        // width reflects on/off; color is remembered even while off (0
+        // width) so the swatch doesn't reset when the checkbox is unticked
         const fi = first as unknown as EditableImage;
-        const hasOutline = !!fi.outlineColor && (fi.outlineWidth ?? 0) > 0;
         setStrokeProps({
-          color: hasOutline ? fi.outlineColor! : "#000000",
-          width: hasOutline ? fi.outlineWidth! : 0,
+          color: fi.outlineColor ?? "#000000",
+          width: fi.outlineWidth ?? 0,
         });
       } else {
-        const hasStroke = typeof first.stroke === "string" && first.stroke.length > 0;
+        const hasColor = typeof first.stroke === "string" && first.stroke.length > 0;
         setStrokeProps({
-          color: hasStroke ? (first.stroke as string) : "#000000",
-          width: hasStroke ? first.strokeWidth ?? 1 : 0,
+          color: hasColor ? (first.stroke as string) : "#000000",
+          width: hasColor ? first.strokeWidth ?? 0 : 0,
         });
       }
     } else {
@@ -639,7 +640,9 @@ export function useEditor(
     reo.id = eo.id;
     reo.name = eo.name;
     reo.baseSrc = baseSrc;
-    reo.outlineColor = width > 0 ? color : undefined;
+    // remember color even while disabled (width 0), same as text keeps its
+    // stroke color when strokeWidth drops to 0 — so re-enabling restores it
+    reo.outlineColor = color;
     reo.outlineWidth = width > 0 ? width : 0;
 
     const index = canvas.getObjects().indexOf(imageObj);

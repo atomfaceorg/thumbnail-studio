@@ -197,6 +197,16 @@ button.primary:hover {
   accent-color: var(--accent);
 }
 
+.text-inspector-field input[type="checkbox"] {
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.text-inspector-field input:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .text-inspector-value {
   font-size: 12px;
   color: var(--text-dim);

@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import type { Editor } from "../lib/useEditor";
 import { TEXT_FONT_OPTIONS } from "../lib/constants";
 
@@ -88,13 +89,33 @@ function ShapeFields({ editor }: Props) {
 
 function StrokeFields({ editor }: Props) {
   const { color, width } = editor.strokeProps!;
+  const enabled = width > 0;
+
+  // remembers the last nonzero width so unticking-then-reticking the
+  // checkbox restores it, instead of forcing the user to retype it
+  const lastWidthRef = useRef(4);
+  if (width > 0) lastWidthRef.current = width;
+
   return (
     <>
       <span className="text-inspector-divider" />
 
       <label className="text-inspector-field">
+        <input
+          type="checkbox"
+          checked={enabled}
+          onChange={(e) => editor.setStrokeWidth(e.target.checked ? lastWidthRef.current : 0)}
+        />
         <span>Stroke</span>
-        <input type="color" value={color} onChange={(e) => editor.setStrokeColor(e.target.value)} />
+      </label>
+
+      <label className="text-inspector-field">
+        <input
+          type="color"
+          value={color}
+          disabled={!enabled}
+          onChange={(e) => editor.setStrokeColor(e.target.value)}
+        />
       </label>
 
       <label className="text-inspector-field">
@@ -104,6 +125,7 @@ function StrokeFields({ editor }: Props) {
           min={0}
           max={60}
           value={Math.round(width)}
+          disabled={!enabled}
           onChange={(e) => {
             const n = Number(e.target.value);
             if (Number.isFinite(n) && n >= 0) editor.setStrokeWidth(n);
