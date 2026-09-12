@@ -80,28 +80,46 @@ function loadHTMLImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
+// Alpha values below this (out of 255) are treated as "not part of the
+// subject" when building the silhouette. Background-removal cutouts have
+// soft/antialiased edges; carrying that softness into the dilation below
+// makes the outline come out patchy and uneven ("fuzzy"), so we binarize
+// it first to get a clean, hard-edged shape to stamp.
+const SILHOUETTE_ALPHA_THRESHOLD = 10;
+
 // Builds a bitmap where the image's alpha silhouette (i.e. whatever survived
 // background removal, or the full rect if it hasn't been cut out) is
-// recolored and stamped around a ring to dilate it into a solid outline,
-// then the original image is drawn on top — a classic "sticker" edge that
-// hugs the actual subject instead of the rectangular photo bounds.
+// binarized, recolored, and stamped across a dense grid of points spanning
+// the whole outline radius — not just its outer ring — so the outline comes
+// out a uniform thickness all the way around, including thin or concave
+// parts of the subject (a gun barrel, fingers, hair) that a ring-only stamp
+// leaves gappy. The original image is drawn on top last, producing a
+// "sticker" edge that hugs the actual subject instead of the photo's
+// rectangular bounds.
 async function generateOutlinedImageBlob(
   baseSrc: string,
   color: string,
   radius: number
 ): Promise<Blob> {
   const img = await loadHTMLImage(baseSrc);
-  const r = Math.max(1, Math.round(radius));
-  const w = img.naturalWidth + r * 2;
-  const h = img.naturalHeight + r * 2;
+  const r = Math.max(1, radius);
+  const pad = Math.ceil(r);
+  const w = img.naturalWidth + pad * 2;
+  const h = img.naturalHeight + pad * 2;
 
   const silhouette = document.createElement("canvas");
   silhouette.width = w;
   silhouette.height = h;
   const sctx = silhouette.getContext("2d")!;
-  sctx.drawImage(img, r, r);
-  // source-in keeps the destination's alpha (the image's shape/soft edges)
-  // and replaces its color, producing a solid-color cutout of the subject.
+  sctx.drawImage(img, pad, pad);
+  const shot = sctx.getImageData(0, 0, w, h);
+  const sdata = shot.data;
+  for (let i = 3; i < sdata.length; i += 4) {
+    sdata[i] = sdata[i] >= SILHOUETTE_ALPHA_THRESHOLD ? 255 : 0;
+  }
+  sctx.putImageData(shot, 0, 0);
+  // source-in keeps the destination's (now hard-edged) alpha shape and
+  // replaces its color, producing a solid-color cutout of the subject.
   sctx.globalCompositeOperation = "source-in";
   sctx.fillStyle = color;
   sctx.fillRect(0, 0, w, h);
@@ -110,12 +128,18 @@ async function generateOutlinedImageBlob(
   out.width = w;
   out.height = h;
   const octx = out.getContext("2d")!;
-  const steps = 36;
-  for (let i = 0; i < steps; i++) {
-    const angle = (i / steps) * Math.PI * 2;
-    octx.drawImage(silhouette, Math.round(Math.cos(angle) * r), Math.round(Math.sin(angle) * r));
+  // Fixed point density regardless of radius keeps this cheap (bounded
+  // draw count) while staying dense enough for a smooth aggregate edge —
+  // fractional offsets let the browser's own antialiasing soften each
+  // stamp slightly, which is what gives the final union a smooth boundary
+  // instead of a jagged/pixelated one.
+  const step = (r * 2) / 14;
+  for (let dy = -r; dy <= r; dy += step) {
+    for (let dx = -r; dx <= r; dx += step) {
+      if (dx * dx + dy * dy <= r * r) octx.drawImage(silhouette, dx, dy);
+    }
   }
-  octx.drawImage(img, r, r);
+  octx.drawImage(img, pad, pad);
 
   return new Promise((resolve, reject) => {
     out.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("toBlob failed"))), "image/png");
