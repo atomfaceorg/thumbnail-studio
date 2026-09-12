@@ -50,7 +50,7 @@ Opens at http://localhost:5173. The editor works without the backend running;
 - Image upload, drag/resize/rotate on canvas.
 - One-click background removal per image layer (calls the local backend).
 - Undo/redo (buttons and Cmd/Ctrl+Z / Cmd/Ctrl+Shift+Z), with multi-step actions coalesced into one step.
-- Light/dark mode, following your OS setting by default.
+- Light/dark mode, defaulting to light (your explicit choice is remembered and always wins).
 - Export to PNG.
 - Projects autosave to the browser's localStorage — no backend needed for that.
 
