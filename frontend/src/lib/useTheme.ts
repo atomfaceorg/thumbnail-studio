@@ -1,28 +1,28 @@
 import { useCallback, useEffect, useState } from "react";
-import { applyExplicitTheme, getStoredTheme, getSystemTheme, storeTheme, type Theme } from "./theme";
+import { applyTheme, DEFAULT_THEME, getStoredTheme, storeTheme, type Theme } from "./theme";
 
 export function useTheme() {
-  const [explicitTheme, setExplicitTheme] = useState<Theme | null>(() => getStoredTheme());
-  const [systemTheme, setSystemTheme] = useState<Theme>(() => getSystemTheme());
+  const [theme, setTheme] = useState<Theme>(() => {
+    // stamp synchronously during the initial render (before paint) so an
+    // OS dark-mode user never sees a flash of dark before this corrects it
+    const initial = getStoredTheme() ?? DEFAULT_THEME;
+    applyTheme(initial);
+    return initial;
+  });
 
+  // always stamp an explicit attribute (even for the default) so it wins
+  // over the OS's prefers-color-scheme regardless of the user's system setting
   useEffect(() => {
-    const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    const handler = (e: MediaQueryListEvent) => setSystemTheme(e.matches ? "dark" : "light");
-    mq.addEventListener("change", handler);
-    return () => mq.removeEventListener("change", handler);
-  }, []);
-
-  useEffect(() => {
-    applyExplicitTheme(explicitTheme);
-  }, [explicitTheme]);
+    applyTheme(theme);
+  }, [theme]);
 
   const toggleTheme = useCallback(() => {
-    setExplicitTheme((prev) => {
-      const next: Theme = (prev ?? getSystemTheme()) === "dark" ? "light" : "dark";
+    setTheme((prev) => {
+      const next: Theme = prev === "dark" ? "light" : "dark";
       storeTheme(next);
       return next;
     });
   }, []);
 
-  return { theme: explicitTheme ?? systemTheme, toggleTheme };
+  return { theme, toggleTheme };
 }
