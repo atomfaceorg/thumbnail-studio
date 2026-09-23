@@ -25,3 +25,10 @@ export const TEXT_FONT_OPTIONS = [
 export const HISTORY_LIMIT = 100;
 
 export const DEFAULT_RECT_FILL = "#111111";
+
+export const DEFAULT_TEXT_SHADOW = {
+  color: "#000000",
+  blur: 12,
+  offsetX: 6,
+  offsetY: 6,
+};

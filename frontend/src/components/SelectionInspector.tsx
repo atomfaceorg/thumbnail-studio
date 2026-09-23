@@ -12,6 +12,7 @@ export default function SelectionInspector({ editor }: Props) {
   return (
     <div className="text-inspector">
       {editor.textProps && <TextFields editor={editor} />}
+      {editor.shadowProps && <ShadowFields editor={editor} />}
       {editor.shapeProps && <ShapeFields editor={editor} />}
       {editor.strokeProps && <StrokeFields editor={editor} />}
     </div>
@@ -52,6 +53,85 @@ function TextFields({ editor }: Props) {
           onChange={(e) => {
             const n = Number(e.target.value);
             if (Number.isFinite(n) && n > 0) editor.setTextFontSize(n);
+          }}
+        />
+      </label>
+    </>
+  );
+}
+
+function ShadowFields({ editor }: Props) {
+  const { color, blur, offsetX, offsetY } = editor.shadowProps!;
+  const enabled = blur > 0 || offsetX !== 0 || offsetY !== 0;
+
+  // remembers the last nonzero shadow so unticking-then-reticking the
+  // checkbox restores it, instead of forcing the user to redial it in
+  const lastRef = useRef({ color: "#000000", blur: 12, offsetX: 6, offsetY: 6 });
+  if (enabled) lastRef.current = { color, blur, offsetX, offsetY };
+
+  return (
+    <>
+      <span className="text-inspector-divider" />
+
+      <label className="text-inspector-field">
+        <input
+          type="checkbox"
+          checked={enabled}
+          onChange={(e) => (e.target.checked ? editor.setTextShadow(lastRef.current) : editor.clearTextShadow())}
+        />
+        <span>Shadow</span>
+      </label>
+
+      <label className="text-inspector-field">
+        <input
+          type="color"
+          value={color.startsWith("#") ? color : "#000000"}
+          disabled={!enabled}
+          onChange={(e) => editor.setTextShadow({ color: e.target.value })}
+        />
+      </label>
+
+      <label className="text-inspector-field">
+        <span>Blur</span>
+        <input
+          type="number"
+          min={0}
+          max={60}
+          value={Math.round(blur)}
+          disabled={!enabled}
+          onChange={(e) => {
+            const n = Number(e.target.value);
+            if (Number.isFinite(n) && n >= 0) editor.setTextShadow({ blur: n });
+          }}
+        />
+      </label>
+
+      <label className="text-inspector-field">
+        <span>Offset X</span>
+        <input
+          type="number"
+          min={-60}
+          max={60}
+          value={Math.round(offsetX)}
+          disabled={!enabled}
+          onChange={(e) => {
+            const n = Number(e.target.value);
+            if (Number.isFinite(n)) editor.setTextShadow({ offsetX: n });
+          }}
+        />
+      </label>
+
+      <label className="text-inspector-field">
+        <span>Offset Y</span>
+        <input
+          type="number"
+          min={-60}
+          max={60}
+          value={Math.round(offsetY)}
+          disabled={!enabled}
+          onChange={(e) => {
+            const n = Number(e.target.value);
+            if (Number.isFinite(n)) editor.setTextShadow({ offsetY: n });
           }}
         />
       </label>

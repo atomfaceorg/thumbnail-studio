@@ -21,6 +21,13 @@ export interface StrokeProps {
   width: number;
 }
 
+export interface ShadowProps {
+  color: string;
+  blur: number;
+  offsetX: number;
+  offsetY: number;
+}
+
 export interface ShapeProps {
   fill: string;
   opacity: number;

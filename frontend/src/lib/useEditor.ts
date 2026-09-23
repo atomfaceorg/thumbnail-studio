@@ -4,11 +4,12 @@ import {
   CANVAS_WIDTH,
   CANVAS_HEIGHT,
   DEFAULT_RECT_FILL,
+  DEFAULT_TEXT_SHADOW,
   HISTORY_LIMIT,
   STORAGE_KEY,
   TEXT_FONT_OPTIONS,
 } from "./constants";
-import type { LayerInfo, ShapeProps, StrokeProps, TextPreset, TextProps } from "./types";
+import type { LayerInfo, ShadowProps, ShapeProps, StrokeProps, TextPreset, TextProps } from "./types";
 import { removeBackground, urlToBlob } from "./backgroundRemoval";
 
 // Fabric objects don't carry id/name by default; we stamp both on every
@@ -155,6 +156,7 @@ export function useEditor(
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [textProps, setTextProps] = useState<TextProps | null>(null);
   const [strokeProps, setStrokeProps] = useState<StrokeProps | null>(null);
+  const [shadowProps, setShadowProps] = useState<ShadowProps | null>(null);
   const [shapeProps, setShapeProps] = useState<ShapeProps | null>(null);
   const [displayScale, setDisplayScale] = useState(1);
   const [busy, setBusy] = useState(false);
@@ -197,6 +199,18 @@ export function useEditor(
       });
     } else {
       setTextProps(null);
+    }
+
+    if (activeText.length > 0) {
+      const shadow = activeText[0].shadow as InstanceType<typeof Shadow> | null;
+      setShadowProps({
+        color: (shadow?.color as string) ?? DEFAULT_TEXT_SHADOW.color,
+        blur: shadow?.blur ?? 0,
+        offsetX: shadow?.offsetX ?? 0,
+        offsetY: shadow?.offsetY ?? 0,
+      });
+    } else {
+      setShadowProps(null);
     }
 
     if (activeObjects.length > 0) {
@@ -605,6 +619,43 @@ export function useEditor(
     [applyToSelectedText]
   );
 
+  // shadow applies only to text (fabric's native drop shadow), and is kept
+  // separate from applyToSelectedText since enabling it needs to fall back
+  // to the current shadow's values (or the defaults) per-field, not just
+  // overwrite the whole object like a plain TextProps patch would.
+  const setTextShadow = useCallback(
+    (patch: Partial<ShadowProps>) => {
+      const canvas = fabricRef.current;
+      if (!canvas) return;
+      const targets = canvas.getActiveObjects().filter((o) => o.type === "i-text") as IText[];
+      if (targets.length === 0) return;
+      for (const t of targets) {
+        const current = t.shadow as InstanceType<typeof Shadow> | null;
+        t.set({
+          shadow: new Shadow({
+            color: patch.color ?? (current?.color as string | undefined) ?? DEFAULT_TEXT_SHADOW.color,
+            blur: patch.blur ?? current?.blur ?? DEFAULT_TEXT_SHADOW.blur,
+            offsetX: patch.offsetX ?? current?.offsetX ?? DEFAULT_TEXT_SHADOW.offsetX,
+            offsetY: patch.offsetY ?? current?.offsetY ?? DEFAULT_TEXT_SHADOW.offsetY,
+          }),
+        });
+      }
+      canvas.requestRenderAll();
+      notifyChange();
+    },
+    [notifyChange]
+  );
+
+  const clearTextShadow = useCallback(() => {
+    const canvas = fabricRef.current;
+    if (!canvas) return;
+    const targets = canvas.getActiveObjects().filter((o) => o.type === "i-text") as IText[];
+    if (targets.length === 0) return;
+    for (const t of targets) t.set({ shadow: undefined });
+    canvas.requestRenderAll();
+    notifyChange();
+  }, [notifyChange]);
+
   const applyToSelectedShapes = useCallback(
     (patch: Partial<ShapeProps>) => {
       const canvas = fabricRef.current;
@@ -791,6 +842,7 @@ export function useEditor(
     selectedId: selectedIds[0] ?? null,
     textProps,
     strokeProps,
+    shadowProps,
     shapeProps,
     displayScale,
     busy,
@@ -810,6 +862,8 @@ export function useEditor(
     setTextFill,
     setTextFontFamily,
     setTextFontSize,
+    setTextShadow,
+    clearTextShadow,
     setStrokeColor,
     setStrokeWidth,
     setShapeFill,
