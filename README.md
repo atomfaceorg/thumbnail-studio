@@ -47,9 +47,11 @@ Opens at http://localhost:5173. The editor works without the backend running;
 - Layers panel: add/drag-to-reorder/delete/toggle-visibility, multi-select (shift/cmd-click).
 - Text tool with presets (bold outline, drop shadow, plain), plus live color, font, and size controls.
 - Stroke controls (color + width) for both text and image layers.
+- Drop-shadow controls (color, blur, offset) for both text and image layers; on background-removed images the shadow follows the cutout.
 - Image upload, drag/resize/rotate on canvas.
 - One-click background removal per image layer (calls the local backend).
 - Undo/redo (buttons and Cmd/Ctrl+Z / Cmd/Ctrl+Shift+Z), with multi-step actions coalesced into one step.
+- Duplicate layers (toolbar button, per-layer button, or Cmd/Ctrl+D); copies keep stroke, shadow, and cutout and land just above the original.
 - Light/dark mode, defaulting to light (your explicit choice is remembered and always wins).
 - Export to PNG.
 - Projects autosave to the browser's localStorage — no backend needed for that.

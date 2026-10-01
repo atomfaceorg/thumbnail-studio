@@ -1,16 +1,28 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ActiveSelection, Canvas, FabricImage, IText, Rect, Shadow, type FabricObject } from "fabric";
 import {
+  CANVAS_BACKGROUND,
   CANVAS_WIDTH,
   CANVAS_HEIGHT,
   DEFAULT_RECT_FILL,
-  DEFAULT_TEXT_SHADOW,
+  DEFAULT_SHADOW,
+  DUPLICATE_OFFSET,
   HISTORY_LIMIT,
   STORAGE_KEY,
   TEXT_FONT_OPTIONS,
 } from "./constants";
 import type { LayerInfo, ShadowProps, ShapeProps, StrokeProps, TextPreset, TextProps } from "./types";
 import { removeBackground, urlToBlob } from "./backgroundRemoval";
+
+// fabric's loadFromJSON calls clear(), which blanks backgroundColor (and only
+// restores it if the JSON has `background`) and wipes the lower canvas, then
+// leaves the repaint to requestRenderAll. That rAF can be deferred
+// indefinitely in a hidden/backgrounded tab, so the canvas reads transparent.
+// Re-apply the background and paint synchronously after every load.
+function finishLoad(canvas: Canvas) {
+  canvas.backgroundColor = CANVAS_BACKGROUND;
+  canvas.renderAll();
+}
 
 // Fabric objects don't carry id/name by default; we stamp both on every
 // object we create and ask fabric to serialize them via toJSON/toObject's
@@ -29,6 +41,10 @@ type EditableImage = EditableObject & {
 };
 
 const PERSISTED_EXTRA_PROPS = ["id", "name", "baseSrc", "outlineColor", "outlineWidth"];
+
+function isShadowable(o: FabricObject) {
+  return o.type === "i-text" || o.type === "image";
+}
 
 function makeId() {
   return crypto.randomUUID();
@@ -201,10 +217,11 @@ export function useEditor(
       setTextProps(null);
     }
 
-    if (activeText.length > 0) {
-      const shadow = activeText[0].shadow as InstanceType<typeof Shadow> | null;
+    const activeShadowable = activeObjects.filter(isShadowable);
+    if (activeShadowable.length > 0) {
+      const shadow = activeShadowable[0].shadow as InstanceType<typeof Shadow> | null;
       setShadowProps({
-        color: (shadow?.color as string) ?? DEFAULT_TEXT_SHADOW.color,
+        color: (shadow?.color as string) ?? DEFAULT_SHADOW.color,
         blur: shadow?.blur ?? 0,
         offsetX: shadow?.offsetX ?? 0,
         offsetY: shadow?.offsetY ?? 0,
@@ -298,7 +315,7 @@ export function useEditor(
     });
     // setting backgroundColor via the constructor options is unreliable in
     // fabric 6.9 (silently stays unset) — set it directly instead.
-    canvas.backgroundColor = "#1e1e1e";
+    canvas.backgroundColor = CANVAS_BACKGROUND;
     // synchronous, not requestRenderAll: the very first paint must not
     // depend on a requestAnimationFrame callback actually firing, which
     // browsers can defer indefinitely if the tab starts out backgrounded.
@@ -318,18 +335,26 @@ export function useEditor(
       pushHistory();
     };
 
+    // StrictMode mounts this effect twice on the same <canvas> element; abort
+    // the first mount's load so it can't clear() the shared element after
+    // the second canvas has already painted.
+    const loadAbort = new AbortController();
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) {
       canvas
-        .loadFromJSON(JSON.parse(saved))
+        .loadFromJSON(JSON.parse(saved), undefined, { signal: loadAbort.signal })
         .then(() => {
           ensureIdsAndNames(canvas);
-          canvas.requestRenderAll();
+          finishLoad(canvas);
           refreshLayers();
+          // rewrite the save so older ones that lack `background` are repaired
+          persist();
           seedHistory();
         })
         .catch(() => {
+          if (loadAbort.signal.aborted) return;
           /* corrupt/incompatible save — start fresh */
+          finishLoad(canvas);
           seedHistory();
         });
     } else {
@@ -337,6 +362,7 @@ export function useEditor(
     }
 
     return () => {
+      loadAbort.abort();
       canvas.dispose();
       fabricRef.current = null;
     };
@@ -503,6 +529,7 @@ export function useEditor(
         scaleX: imageObj.scaleX,
         scaleY: imageObj.scaleY,
         angle: imageObj.angle,
+        shadow: imageObj.shadow,
       });
       const replacementEo = asEditable(replacement) as EditableImage;
       replacementEo.id = eo.id;
@@ -541,6 +568,47 @@ export function useEditor(
     canvas.remove(...active);
     canvas.requestRenderAll();
   }, []);
+
+  // Each copy lands directly above its original in the stack, nudged
+  // down-right so it's visibly separate, and the copies become the new
+  // selection. The selection is discarded first because objects inside an
+  // ActiveSelection carry group-relative coordinates, which clone() would
+  // otherwise copy as if they were absolute.
+  const duplicateObjects = useCallback(async (objs: FabricObject[]) => {
+    const canvas = fabricRef.current;
+    if (!canvas || objs.length === 0) return;
+    canvas.discardActiveObject();
+    const copies: FabricObject[] = [];
+    for (const obj of objs) {
+      const copy = await obj.clone(PERSISTED_EXTRA_PROPS);
+      copy.set({ left: (obj.left ?? 0) + DUPLICATE_OFFSET, top: (obj.top ?? 0) + DUPLICATE_OFFSET });
+      const ceo = asEditable(copy);
+      ceo.id = makeId();
+      ceo.name = `${asEditable(obj).name} copy`;
+      canvas.insertAt(canvas.getObjects().indexOf(obj) + 1, copy);
+      copies.push(copy);
+    }
+    if (copies.length === 1) canvas.setActiveObject(copies[0]);
+    else canvas.setActiveObject(new ActiveSelection(copies, { canvas }));
+    canvas.requestRenderAll();
+  }, []);
+
+  const duplicateLayer = useCallback(
+    (id: string) => {
+      const obj = findById(id);
+      if (obj) void duplicateObjects([obj]);
+    },
+    [findById, duplicateObjects]
+  );
+
+  const duplicateSelected = useCallback(() => {
+    const canvas = fabricRef.current;
+    if (!canvas) return;
+    // canvas stacking order, so copies of a multi-selection keep their
+    // relative order
+    const active = canvas.getActiveObjects();
+    void duplicateObjects(canvas.getObjects().filter((o) => active.includes(o)));
+  }, [duplicateObjects]);
 
   const toggleVisibility = useCallback(
     (id: string) => {
@@ -619,24 +687,29 @@ export function useEditor(
     [applyToSelectedText]
   );
 
-  // shadow applies only to text (fabric's native drop shadow), and is kept
-  // separate from applyToSelectedText since enabling it needs to fall back
-  // to the current shadow's values (or the defaults) per-field, not just
-  // overwrite the whole object like a plain TextProps patch would.
-  const setTextShadow = useCallback(
+  // shadow uses fabric's native drop shadow, which follows the drawn
+  // pixels' alpha — so it hugs glyphs on text and the cutout silhouette on
+  // background-removed images. Kept separate from applyToSelectedText since
+  // enabling it needs to fall back to the current shadow's values (or the
+  // defaults) per-field, not just overwrite the whole object like a plain
+  // TextProps patch would.
+  const setShadow = useCallback(
     (patch: Partial<ShadowProps>) => {
       const canvas = fabricRef.current;
       if (!canvas) return;
-      const targets = canvas.getActiveObjects().filter((o) => o.type === "i-text") as IText[];
+      const targets = canvas.getActiveObjects().filter(isShadowable);
       if (targets.length === 0) return;
       for (const t of targets) {
         const current = t.shadow as InstanceType<typeof Shadow> | null;
         t.set({
           shadow: new Shadow({
-            color: patch.color ?? (current?.color as string | undefined) ?? DEFAULT_TEXT_SHADOW.color,
-            blur: patch.blur ?? current?.blur ?? DEFAULT_TEXT_SHADOW.blur,
-            offsetX: patch.offsetX ?? current?.offsetX ?? DEFAULT_TEXT_SHADOW.offsetX,
-            offsetY: patch.offsetY ?? current?.offsetY ?? DEFAULT_TEXT_SHADOW.offsetY,
+            color: patch.color ?? (current?.color as string | undefined) ?? DEFAULT_SHADOW.color,
+            blur: patch.blur ?? current?.blur ?? DEFAULT_SHADOW.blur,
+            offsetX: patch.offsetX ?? current?.offsetX ?? DEFAULT_SHADOW.offsetX,
+            offsetY: patch.offsetY ?? current?.offsetY ?? DEFAULT_SHADOW.offsetY,
+            // images are usually scaled way down from their source size, so
+            // without this a 6px offset would render as ~1px on canvas
+            nonScaling: t.type === "image",
           }),
         });
       }
@@ -646,10 +719,10 @@ export function useEditor(
     [notifyChange]
   );
 
-  const clearTextShadow = useCallback(() => {
+  const clearShadow = useCallback(() => {
     const canvas = fabricRef.current;
     if (!canvas) return;
-    const targets = canvas.getActiveObjects().filter((o) => o.type === "i-text") as IText[];
+    const targets = canvas.getActiveObjects().filter(isShadowable);
     if (targets.length === 0) return;
     for (const t of targets) t.set({ shadow: undefined });
     canvas.requestRenderAll();
@@ -710,6 +783,7 @@ export function useEditor(
       scaleX: imageObj.scaleX,
       scaleY: imageObj.scaleY,
       angle: imageObj.angle,
+      shadow: imageObj.shadow,
     });
     const reo = asEditable(replacement) as EditableImage;
     reo.id = eo.id;
@@ -774,9 +848,9 @@ export function useEditor(
         .loadFromJSON(JSON.parse(snapshot))
         .then(() => {
           ensureIdsAndNames(canvas);
-          canvas.requestRenderAll();
         })
         .finally(() => {
+          finishLoad(canvas);
           isRestoringRef.current = false;
           refreshLayers();
           persist();
@@ -800,20 +874,27 @@ export function useEditor(
     restoreSnapshot(stack[historyIndexRef.current]);
   }, [restoreSnapshot]);
 
-  // keyboard shortcuts: Cmd/Ctrl+Z to undo, Cmd/Ctrl+Shift+Z to redo
+  // keyboard shortcuts: Cmd/Ctrl+Z to undo, Cmd/Ctrl+Shift+Z to redo,
+  // Cmd/Ctrl+D to duplicate the selection
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement | null)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
       if (isEditingText(fabricRef.current?.getActiveObject())) return;
-      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "z") return;
-      e.preventDefault();
-      if (e.shiftKey) redo();
-      else undo();
+      if (!(e.metaKey || e.ctrlKey)) return;
+      const key = e.key.toLowerCase();
+      if (key === "z") {
+        e.preventDefault();
+        if (e.shiftKey) redo();
+        else undo();
+      } else if (key === "d") {
+        e.preventDefault(); // otherwise the browser bookmarks the page
+        duplicateSelected();
+      }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [undo, redo]);
+  }, [undo, redo, duplicateSelected]);
 
   const exportPNG = useCallback(() => {
     const canvas = fabricRef.current;
@@ -854,6 +935,8 @@ export function useEditor(
     removeBackgroundForSelected,
     selectLayer,
     deleteLayer,
+    duplicateLayer,
+    duplicateSelected,
     deleteSelected,
     toggleVisibility,
     reorderLayer,
@@ -862,8 +945,8 @@ export function useEditor(
     setTextFill,
     setTextFontFamily,
     setTextFontSize,
-    setTextShadow,
-    clearTextShadow,
+    setShadow,
+    clearShadow,
     setStrokeColor,
     setStrokeWidth,
     setShapeFill,

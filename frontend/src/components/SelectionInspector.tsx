@@ -77,7 +77,7 @@ function ShadowFields({ editor }: Props) {
         <input
           type="checkbox"
           checked={enabled}
-          onChange={(e) => (e.target.checked ? editor.setTextShadow(lastRef.current) : editor.clearTextShadow())}
+          onChange={(e) => (e.target.checked ? editor.setShadow(lastRef.current) : editor.clearShadow())}
         />
         <span>Shadow</span>
       </label>
@@ -87,7 +87,7 @@ function ShadowFields({ editor }: Props) {
           type="color"
           value={color.startsWith("#") ? color : "#000000"}
           disabled={!enabled}
-          onChange={(e) => editor.setTextShadow({ color: e.target.value })}
+          onChange={(e) => editor.setShadow({ color: e.target.value })}
         />
       </label>
 
@@ -101,7 +101,7 @@ function ShadowFields({ editor }: Props) {
           disabled={!enabled}
           onChange={(e) => {
             const n = Number(e.target.value);
-            if (Number.isFinite(n) && n >= 0) editor.setTextShadow({ blur: n });
+            if (Number.isFinite(n) && n >= 0) editor.setShadow({ blur: n });
           }}
         />
       </label>
@@ -116,7 +116,7 @@ function ShadowFields({ editor }: Props) {
           disabled={!enabled}
           onChange={(e) => {
             const n = Number(e.target.value);
-            if (Number.isFinite(n)) editor.setTextShadow({ offsetX: n });
+            if (Number.isFinite(n)) editor.setShadow({ offsetX: n });
           }}
         />
       </label>
@@ -131,7 +131,7 @@ function ShadowFields({ editor }: Props) {
           disabled={!enabled}
           onChange={(e) => {
             const n = Number(e.target.value);
-            if (Number.isFinite(n)) editor.setTextShadow({ offsetY: n });
+            if (Number.isFinite(n)) editor.setShadow({ offsetY: n });
           }}
         />
       </label>

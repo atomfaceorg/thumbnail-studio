@@ -1,6 +1,10 @@
 export const CANVAS_WIDTH = 1280;
 export const CANVAS_HEIGHT = 720;
 
+// the canvas's own fill (not a layer) — always re-applied after a load, since
+// fabric's loadFromJSON clears it and older saves may not carry it at all.
+export const CANVAS_BACKGROUND = "#1e1e1e";
+
 // YouTube has no official "title-safe" spec like broadcast TV, but the player
 // UI (duration badge, progress bar, channel logo on some layouts) tends to
 // sit near the edges — this is just a rule-of-thumb inset guide, not a spec.
@@ -24,9 +28,12 @@ export const TEXT_FONT_OPTIONS = [
 
 export const HISTORY_LIMIT = 100;
 
+// how far (canvas px) a duplicated layer is nudged down-right from its original
+export const DUPLICATE_OFFSET = 20;
+
 export const DEFAULT_RECT_FILL = "#111111";
 
-export const DEFAULT_TEXT_SHADOW = {
+export const DEFAULT_SHADOW = {
   color: "#000000",
   blur: 12,
   offsetX: 6,

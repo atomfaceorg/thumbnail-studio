@@ -104,6 +104,16 @@ export default function LayersPanel({ editor }: Props) {
             </button>
             <button
               className="icon-button"
+              title="Duplicate"
+              onClick={(e) => {
+                e.stopPropagation();
+                editor.duplicateLayer(layer.id);
+              }}
+            >
+              ⧉
+            </button>
+            <button
+              className="icon-button"
               title="Delete"
               onClick={(e) => {
                 e.stopPropagation();

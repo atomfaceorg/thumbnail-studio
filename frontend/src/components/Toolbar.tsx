@@ -52,6 +52,9 @@ export default function Toolbar({ editor }: Props) {
         <button disabled={!canRemoveBg || editor.busy} onClick={editor.removeBackgroundForSelected}>
           {editor.busy ? "Removing…" : "Remove background"}
         </button>
+        <button title="Duplicate (Cmd/Ctrl+D)" disabled={selectedLayers.length === 0} onClick={editor.duplicateSelected}>
+          Duplicate
+        </button>
         <button disabled={selectedLayers.length === 0} onClick={editor.deleteSelected}>
           Delete
         </button>
