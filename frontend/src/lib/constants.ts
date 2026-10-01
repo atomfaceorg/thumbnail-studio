@@ -1,6 +1,10 @@
 export const CANVAS_WIDTH = 1280;
 export const CANVAS_HEIGHT = 720;
 
+// the canvas's own fill (not a layer) — always re-applied after a load, since
+// fabric's loadFromJSON clears it and older saves may not carry it at all.
+export const CANVAS_BACKGROUND = "#1e1e1e";
+
 // YouTube has no official "title-safe" spec like broadcast TV, but the player
 // UI (duration badge, progress bar, channel logo on some layouts) tends to
 // sit near the edges — this is just a rule-of-thumb inset guide, not a spec.

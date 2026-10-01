@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ActiveSelection, Canvas, FabricImage, IText, Rect, Shadow, type FabricObject } from "fabric";
 import {
+  CANVAS_BACKGROUND,
   CANVAS_WIDTH,
   CANVAS_HEIGHT,
   DEFAULT_RECT_FILL,
@@ -12,6 +13,16 @@ import {
 } from "./constants";
 import type { LayerInfo, ShadowProps, ShapeProps, StrokeProps, TextPreset, TextProps } from "./types";
 import { removeBackground, urlToBlob } from "./backgroundRemoval";
+
+// fabric's loadFromJSON calls clear(), which blanks backgroundColor (and only
+// restores it if the JSON has `background`) and wipes the lower canvas, then
+// leaves the repaint to requestRenderAll. That rAF can be deferred
+// indefinitely in a hidden/backgrounded tab, so the canvas reads transparent.
+// Re-apply the background and paint synchronously after every load.
+function finishLoad(canvas: Canvas) {
+  canvas.backgroundColor = CANVAS_BACKGROUND;
+  canvas.renderAll();
+}
 
 // Fabric objects don't carry id/name by default; we stamp both on every
 // object we create and ask fabric to serialize them via toJSON/toObject's
@@ -304,7 +315,7 @@ export function useEditor(
     });
     // setting backgroundColor via the constructor options is unreliable in
     // fabric 6.9 (silently stays unset) — set it directly instead.
-    canvas.backgroundColor = "#1e1e1e";
+    canvas.backgroundColor = CANVAS_BACKGROUND;
     // synchronous, not requestRenderAll: the very first paint must not
     // depend on a requestAnimationFrame callback actually firing, which
     // browsers can defer indefinitely if the tab starts out backgrounded.
@@ -324,18 +335,26 @@ export function useEditor(
       pushHistory();
     };
 
+    // StrictMode mounts this effect twice on the same <canvas> element; abort
+    // the first mount's load so it can't clear() the shared element after
+    // the second canvas has already painted.
+    const loadAbort = new AbortController();
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) {
       canvas
-        .loadFromJSON(JSON.parse(saved))
+        .loadFromJSON(JSON.parse(saved), undefined, { signal: loadAbort.signal })
         .then(() => {
           ensureIdsAndNames(canvas);
-          canvas.requestRenderAll();
+          finishLoad(canvas);
           refreshLayers();
+          // rewrite the save so older ones that lack `background` are repaired
+          persist();
           seedHistory();
         })
         .catch(() => {
+          if (loadAbort.signal.aborted) return;
           /* corrupt/incompatible save — start fresh */
+          finishLoad(canvas);
           seedHistory();
         });
     } else {
@@ -343,6 +362,7 @@ export function useEditor(
     }
 
     return () => {
+      loadAbort.abort();
       canvas.dispose();
       fabricRef.current = null;
     };
@@ -828,9 +848,9 @@ export function useEditor(
         .loadFromJSON(JSON.parse(snapshot))
         .then(() => {
           ensureIdsAndNames(canvas);
-          canvas.requestRenderAll();
         })
         .finally(() => {
+          finishLoad(canvas);
           isRestoringRef.current = false;
           refreshLayers();
           persist();
