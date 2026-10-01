@@ -4,7 +4,7 @@ import {
   CANVAS_WIDTH,
   CANVAS_HEIGHT,
   DEFAULT_RECT_FILL,
-  DEFAULT_TEXT_SHADOW,
+  DEFAULT_SHADOW,
   HISTORY_LIMIT,
   STORAGE_KEY,
   TEXT_FONT_OPTIONS,
@@ -29,6 +29,10 @@ type EditableImage = EditableObject & {
 };
 
 const PERSISTED_EXTRA_PROPS = ["id", "name", "baseSrc", "outlineColor", "outlineWidth"];
+
+function isShadowable(o: FabricObject) {
+  return o.type === "i-text" || o.type === "image";
+}
 
 function makeId() {
   return crypto.randomUUID();
@@ -201,10 +205,11 @@ export function useEditor(
       setTextProps(null);
     }
 
-    if (activeText.length > 0) {
-      const shadow = activeText[0].shadow as InstanceType<typeof Shadow> | null;
+    const activeShadowable = activeObjects.filter(isShadowable);
+    if (activeShadowable.length > 0) {
+      const shadow = activeShadowable[0].shadow as InstanceType<typeof Shadow> | null;
       setShadowProps({
-        color: (shadow?.color as string) ?? DEFAULT_TEXT_SHADOW.color,
+        color: (shadow?.color as string) ?? DEFAULT_SHADOW.color,
         blur: shadow?.blur ?? 0,
         offsetX: shadow?.offsetX ?? 0,
         offsetY: shadow?.offsetY ?? 0,
@@ -503,6 +508,7 @@ export function useEditor(
         scaleX: imageObj.scaleX,
         scaleY: imageObj.scaleY,
         angle: imageObj.angle,
+        shadow: imageObj.shadow,
       });
       const replacementEo = asEditable(replacement) as EditableImage;
       replacementEo.id = eo.id;
@@ -619,24 +625,29 @@ export function useEditor(
     [applyToSelectedText]
   );
 
-  // shadow applies only to text (fabric's native drop shadow), and is kept
-  // separate from applyToSelectedText since enabling it needs to fall back
-  // to the current shadow's values (or the defaults) per-field, not just
-  // overwrite the whole object like a plain TextProps patch would.
-  const setTextShadow = useCallback(
+  // shadow uses fabric's native drop shadow, which follows the drawn
+  // pixels' alpha — so it hugs glyphs on text and the cutout silhouette on
+  // background-removed images. Kept separate from applyToSelectedText since
+  // enabling it needs to fall back to the current shadow's values (or the
+  // defaults) per-field, not just overwrite the whole object like a plain
+  // TextProps patch would.
+  const setShadow = useCallback(
     (patch: Partial<ShadowProps>) => {
       const canvas = fabricRef.current;
       if (!canvas) return;
-      const targets = canvas.getActiveObjects().filter((o) => o.type === "i-text") as IText[];
+      const targets = canvas.getActiveObjects().filter(isShadowable);
       if (targets.length === 0) return;
       for (const t of targets) {
         const current = t.shadow as InstanceType<typeof Shadow> | null;
         t.set({
           shadow: new Shadow({
-            color: patch.color ?? (current?.color as string | undefined) ?? DEFAULT_TEXT_SHADOW.color,
-            blur: patch.blur ?? current?.blur ?? DEFAULT_TEXT_SHADOW.blur,
-            offsetX: patch.offsetX ?? current?.offsetX ?? DEFAULT_TEXT_SHADOW.offsetX,
-            offsetY: patch.offsetY ?? current?.offsetY ?? DEFAULT_TEXT_SHADOW.offsetY,
+            color: patch.color ?? (current?.color as string | undefined) ?? DEFAULT_SHADOW.color,
+            blur: patch.blur ?? current?.blur ?? DEFAULT_SHADOW.blur,
+            offsetX: patch.offsetX ?? current?.offsetX ?? DEFAULT_SHADOW.offsetX,
+            offsetY: patch.offsetY ?? current?.offsetY ?? DEFAULT_SHADOW.offsetY,
+            // images are usually scaled way down from their source size, so
+            // without this a 6px offset would render as ~1px on canvas
+            nonScaling: t.type === "image",
           }),
         });
       }
@@ -646,10 +657,10 @@ export function useEditor(
     [notifyChange]
   );
 
-  const clearTextShadow = useCallback(() => {
+  const clearShadow = useCallback(() => {
     const canvas = fabricRef.current;
     if (!canvas) return;
-    const targets = canvas.getActiveObjects().filter((o) => o.type === "i-text") as IText[];
+    const targets = canvas.getActiveObjects().filter(isShadowable);
     if (targets.length === 0) return;
     for (const t of targets) t.set({ shadow: undefined });
     canvas.requestRenderAll();
@@ -710,6 +721,7 @@ export function useEditor(
       scaleX: imageObj.scaleX,
       scaleY: imageObj.scaleY,
       angle: imageObj.angle,
+      shadow: imageObj.shadow,
     });
     const reo = asEditable(replacement) as EditableImage;
     reo.id = eo.id;
@@ -862,8 +874,8 @@ export function useEditor(
     setTextFill,
     setTextFontFamily,
     setTextFontSize,
-    setTextShadow,
-    clearTextShadow,
+    setShadow,
+    clearShadow,
     setStrokeColor,
     setStrokeWidth,
     setShapeFill,

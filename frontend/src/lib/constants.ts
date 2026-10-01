@@ -26,7 +26,7 @@ export const HISTORY_LIMIT = 100;
 
 export const DEFAULT_RECT_FILL = "#111111";
 
-export const DEFAULT_TEXT_SHADOW = {
+export const DEFAULT_SHADOW = {
   color: "#000000",
   blur: 12,
   offsetX: 6,
