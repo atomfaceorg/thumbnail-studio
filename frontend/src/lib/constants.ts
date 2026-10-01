@@ -24,6 +24,9 @@ export const TEXT_FONT_OPTIONS = [
 
 export const HISTORY_LIMIT = 100;
 
+// how far (canvas px) a duplicated layer is nudged down-right from its original
+export const DUPLICATE_OFFSET = 20;
+
 export const DEFAULT_RECT_FILL = "#111111";
 
 export const DEFAULT_SHADOW = {

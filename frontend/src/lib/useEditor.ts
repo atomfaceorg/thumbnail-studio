@@ -5,6 +5,7 @@ import {
   CANVAS_HEIGHT,
   DEFAULT_RECT_FILL,
   DEFAULT_SHADOW,
+  DUPLICATE_OFFSET,
   HISTORY_LIMIT,
   STORAGE_KEY,
   TEXT_FONT_OPTIONS,
@@ -548,6 +549,47 @@ export function useEditor(
     canvas.requestRenderAll();
   }, []);
 
+  // Each copy lands directly above its original in the stack, nudged
+  // down-right so it's visibly separate, and the copies become the new
+  // selection. The selection is discarded first because objects inside an
+  // ActiveSelection carry group-relative coordinates, which clone() would
+  // otherwise copy as if they were absolute.
+  const duplicateObjects = useCallback(async (objs: FabricObject[]) => {
+    const canvas = fabricRef.current;
+    if (!canvas || objs.length === 0) return;
+    canvas.discardActiveObject();
+    const copies: FabricObject[] = [];
+    for (const obj of objs) {
+      const copy = await obj.clone(PERSISTED_EXTRA_PROPS);
+      copy.set({ left: (obj.left ?? 0) + DUPLICATE_OFFSET, top: (obj.top ?? 0) + DUPLICATE_OFFSET });
+      const ceo = asEditable(copy);
+      ceo.id = makeId();
+      ceo.name = `${asEditable(obj).name} copy`;
+      canvas.insertAt(canvas.getObjects().indexOf(obj) + 1, copy);
+      copies.push(copy);
+    }
+    if (copies.length === 1) canvas.setActiveObject(copies[0]);
+    else canvas.setActiveObject(new ActiveSelection(copies, { canvas }));
+    canvas.requestRenderAll();
+  }, []);
+
+  const duplicateLayer = useCallback(
+    (id: string) => {
+      const obj = findById(id);
+      if (obj) void duplicateObjects([obj]);
+    },
+    [findById, duplicateObjects]
+  );
+
+  const duplicateSelected = useCallback(() => {
+    const canvas = fabricRef.current;
+    if (!canvas) return;
+    // canvas stacking order, so copies of a multi-selection keep their
+    // relative order
+    const active = canvas.getActiveObjects();
+    void duplicateObjects(canvas.getObjects().filter((o) => active.includes(o)));
+  }, [duplicateObjects]);
+
   const toggleVisibility = useCallback(
     (id: string) => {
       const canvas = fabricRef.current;
@@ -812,20 +854,27 @@ export function useEditor(
     restoreSnapshot(stack[historyIndexRef.current]);
   }, [restoreSnapshot]);
 
-  // keyboard shortcuts: Cmd/Ctrl+Z to undo, Cmd/Ctrl+Shift+Z to redo
+  // keyboard shortcuts: Cmd/Ctrl+Z to undo, Cmd/Ctrl+Shift+Z to redo,
+  // Cmd/Ctrl+D to duplicate the selection
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement | null)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
       if (isEditingText(fabricRef.current?.getActiveObject())) return;
-      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "z") return;
-      e.preventDefault();
-      if (e.shiftKey) redo();
-      else undo();
+      if (!(e.metaKey || e.ctrlKey)) return;
+      const key = e.key.toLowerCase();
+      if (key === "z") {
+        e.preventDefault();
+        if (e.shiftKey) redo();
+        else undo();
+      } else if (key === "d") {
+        e.preventDefault(); // otherwise the browser bookmarks the page
+        duplicateSelected();
+      }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [undo, redo]);
+  }, [undo, redo, duplicateSelected]);
 
   const exportPNG = useCallback(() => {
     const canvas = fabricRef.current;
@@ -866,6 +915,8 @@ export function useEditor(
     removeBackgroundForSelected,
     selectLayer,
     deleteLayer,
+    duplicateLayer,
+    duplicateSelected,
     deleteSelected,
     toggleVisibility,
     reorderLayer,
